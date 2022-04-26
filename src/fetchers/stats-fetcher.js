@@ -1,11 +1,22 @@
-const { request, logger, CustomError } = require("../common/utils");
-const axios = require("axios");
+// @ts-check
+const axios = require("axios").default;
+const githubUsernameRegex = require("github-username-regex");
+
 const retryer = require("../common/retryer");
 const calculateRank = require("../calculateRank");
-const githubUsernameRegex = require("github-username-regex");
+const {
+  request,
+  logger,
+  CustomError,
+  MissingParamError,
+} = require("../common/utils");
 
 require("dotenv").config();
 
+/**
+ * @param {import('axios').AxiosRequestHeaders} variables
+ * @param {string} token
+ */
 const fetcher = (variables, token) => {
   return request(
     {
@@ -24,7 +35,10 @@ const fetcher = (variables, token) => {
           pullRequests(first: 1) {
             totalCount
           }
-          issues(first: 1) {
+          openIssues: issues(states: OPEN) {
+            totalCount
+          }
+          closedIssues: issues(states: CLOSED) {
             totalCount
           }
           followers {
@@ -45,7 +59,7 @@ const fetcher = (variables, token) => {
     },
     {
       Authorization: `bearer ${token}`,
-    }
+    },
   );
 };
 
@@ -65,7 +79,7 @@ const totalCommitsFetcher = async (username) => {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/vnd.github.cloak-preview",
-        Authorization: `bearer ${token}`,
+        Authorization: `token ${token}`,
       },
     });
   };
@@ -83,12 +97,18 @@ const totalCommitsFetcher = async (username) => {
   }
 };
 
+/**
+ * @param {string} username
+ * @param {boolean} count_private
+ * @param {boolean} include_all_commits
+ * @returns {Promise<import("./types").StatsData>}
+ */
 async function fetchStats(
   username,
   count_private = false,
-  include_all_commits = false
+  include_all_commits = false,
 ) {
-  if (!username) throw Error("Invalid username");
+  if (!username) throw new MissingParamError(["username"]);
 
   const stats = {
     name: "",
@@ -102,30 +122,32 @@ async function fetchStats(
 
   let res = await retryer(fetcher, { login: username });
 
-  let experimental_totalCommits = 0;
-  if (include_all_commits) {
-    experimental_totalCommits = await totalCommitsFetcher(username);
-  }
-
   if (res.data.errors) {
     logger.error(res.data.errors);
     throw new CustomError(
       res.data.errors[0].message || "Could not fetch user",
-      CustomError.USER_NOT_FOUND
+      CustomError.USER_NOT_FOUND,
     );
   }
 
   const user = res.data.data.user;
-  const contributionCount = user.contributionsCollection;
 
   stats.name = user.name || user.login;
-  stats.totalIssues = user.issues.totalCount;
+  stats.totalIssues = user.openIssues.totalCount + user.closedIssues.totalCount;
 
-  stats.totalCommits =
-    contributionCount.totalCommitContributions + experimental_totalCommits;
+  // normal commits
+  stats.totalCommits = user.contributionsCollection.totalCommitContributions;
 
+  // if include_all_commits then just get that,
+  // since totalCommitsFetcher already sends totalCommits no need to +=
+  if (include_all_commits) {
+    stats.totalCommits = await totalCommitsFetcher(username);
+  }
+
+  // if count_private then add private commits to totalCommits so far.
   if (count_private) {
-    stats.totalCommits += contributionCount.restrictedContributionsCount;
+    stats.totalCommits +=
+      user.contributionsCollection.restrictedContributionsCount;
   }
 
   stats.totalPRs = user.pullRequests.totalCount;

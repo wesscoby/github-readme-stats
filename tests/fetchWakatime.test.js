@@ -1,7 +1,7 @@
 require("@testing-library/jest-dom");
 const axios = require("axios");
 const MockAdapter = require("axios-mock-adapter");
-const { fetchLast7Days } = require("../src/fetchers/wakatime-fetcher");
+const { fetchWakatimeStats } = require("../src/fetchers/wakatime-fetcher");
 const mock = new MockAdapter(axios);
 
 afterEach(() => {
@@ -105,11 +105,11 @@ describe("Wakatime fetcher", () => {
     const username = "anuraghazra";
     mock
       .onGet(
-        `https://wakatime.com/api/v1/users/${username}/stats/last_7_days?is_including_today=true`
+        `https://wakatime.com/api/v1/users/${username}/stats/?is_including_today=true`,
       )
       .reply(200, wakaTimeData);
 
-    const repo = await fetchLast7Days({ username });
+    const repo = await fetchWakatimeStats({ username });
     expect(repo).toMatchInlineSnapshot(`
       Object {
         "categories": Array [
@@ -206,8 +206,8 @@ describe("Wakatime fetcher", () => {
   it("should throw error", async () => {
     mock.onGet(/\/https:\/\/wakatime\.com\/api/).reply(404, wakaTimeData);
 
-    await expect(fetchLast7Days("noone")).rejects.toThrow(
-      "Request failed with status code 404"
+    await expect(fetchWakatimeStats("noone")).rejects.toThrow(
+      "Missing params \"username\" make sure you pass the parameters in URL",
     );
   });
 });
